@@ -36,6 +36,17 @@ function makeMap() {
   return map;
 }
 
+function makePlayerMarker(map: leaflet.Map) {
+  const playerMarker = leaflet.marker(MAP_CENTER);
+  playerMarker.bindTooltip("You Are Here");
+  playerMarker.addTo(map);
+  return playerMarker;
+}
+
+// Object constants
+
+const map = makeMap();
+
 // Init
 
-makeMap();
+makePlayerMarker(map);
