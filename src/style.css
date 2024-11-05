@@ -44,7 +44,7 @@ h6 {
 }
 
 #inventory ul {
-  max-height: 6em;
+  max-height: 3em;
   overflow-y: scroll;
 }
 
