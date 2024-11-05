@@ -4,6 +4,7 @@ body {
   background: black;
   color: white;
   font-family: sans-serif;
+  font-size: 16pt;
 }
 
 #map {
@@ -11,4 +12,42 @@ body {
   width: calc(80vw - 4em);
   height: calc(80vh - 20em);
   border-radius: 2em;
+}
+
+h1 {
+  font-size: 32pt;
+}
+h2 {
+  font-size: 29pt;
+}
+h3 {
+  font-size: 26pt;
+}
+h4 {
+  font-size: 23pt;
+}
+h5 {
+  font-size: 20pt;
+}
+h6 {
+  font-size: 18pt;
+}
+
+#inventory {
+  text-align: left;
+  width: fit-content;
+  margin: auto;
+}
+
+#inventory h2 {
+  font-size: 16pt;
+}
+
+#inventory ul {
+  max-height: 6em;
+  overflow-y: scroll;
+}
+
+button {
+  font-size: 100%;
 }
