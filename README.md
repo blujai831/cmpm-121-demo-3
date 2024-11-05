@@ -1,6 +1,5 @@
 # cmpm-121-demo-3
 
-This is the default `README.md` file for the D3 projects. If the student is
-aware of what's going on in their project, they should immediately replace this
-with something more descriptive. It sure would be embarrassing if they forgot to
-do that...
+This is a school assignment.
+If you're the professor or a TA, you don't need a readme.
+If you aren't, this project is useless to you.
