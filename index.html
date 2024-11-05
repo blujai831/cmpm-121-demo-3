@@ -3,11 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script type="module" src="/src/main.ts" defer></script>
   </head>
   <body>
-    <div id="app">
-      <!-- todo -->
-    </div>
-    <script type="module" src="/src/main.ts"></script>
+    <header>
+      <h1>Geocoin Carrier</h1>
+      <nav>
+        <button id="sensor">&#x1F310;</button>
+        <button id="north">&#x2B06;</button>
+        <button id="reset">&#x1F504;</button>
+        <br />
+        <button id="west">&#x2B05;</button>
+        <button id="south">&#x2B07;</button>
+        <button id="east">&#x27A1;</button>
+      </nav>
+    </header>
+    <main>
+      <figure id="map"></figure>
+      <section id="inventory">
+        <h2></h2>
+        <ul></ul>
+      </section>
+    </main>
   </body>
 </html>
