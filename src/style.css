@@ -51,3 +51,7 @@ h6 {
 button {
   font-size: 100%;
 }
+
+.leaflet-tile-container {
+  pointer-events: visible;
+}
