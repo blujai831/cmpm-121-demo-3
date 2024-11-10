@@ -6,6 +6,28 @@ import "./leafletWorkaround.ts";
 import { leafletExtend } from "./leafletWorkaround.ts";
 import luck from "./luck.ts";
 
+// Generics
+
+type Incomplete<T, MustAlreadyHave extends keyof T = never> =
+  & Partial<T>
+  & Pick<T, MustAlreadyHave>;
+
+function asHavingProperties<T extends object>(t: Partial<T>) {
+  /* Currying is required here because TypeScript does not support
+    partial inference of generic parameters. */
+  return function <Ks extends (keyof T)[]>(...keys: Ks) {
+    for (const key of keys) {
+      if (!(key in t)) {
+        throw new Error(`
+          ${t} cast asHavingProperties ${keys}
+          but is missing ${String(key)}
+        `);
+      }
+    }
+    return t as Incomplete<T, Ks[number]>;
+  };
+}
+
 // Types and POD or POD-like constants
 
 const MAP_CENTER = leaflet.latLng(36.98949379578401, -122.06277128548504);
@@ -26,9 +48,21 @@ const GEOCOIN_CACHE_EMOJI = "\u{1F381}";
 const GEOCOIN_CACHE_EMOJI_STYLE = "32px sans-serif";
 const GEOCOIN_CACHE_VISIBILITY_RADIUS = 8;
 
+/* I'm aware the assignment requires that we use the flyweight pattern
+  for game location objects. I argue I am using it:
+  the shared intrinsic state is as defined below,
+  and since the instance-specific extrinsic state passed around to functions
+  is simply leaflet.LatLng, I use it directly as the flyweight object,
+  and don't bother wrapping it in an interface
+  that says "flyweight object" on it or anything.
+  This application of the pattern is atypical
+  in that the intrinsic state is mutable
+  and the extrinsic state is immutable,
+  rather than the other way around. */
 interface GeocoinGridCell {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D | null;
+  latLng: leaflet.LatLng;
   hasCache: boolean;
   coins: number;
 }
@@ -39,7 +73,18 @@ interface AppState {
   map: leaflet.Map;
   userMarker: leaflet.Marker;
   grid: GeocoinGrid;
+  gridLayer: leaflet.GridLayer;
   coinsOwned: number;
+}
+
+function asCompleteAppState(state: Partial<AppState>): AppState {
+  return asHavingProperties<AppState>(state)(
+    "map",
+    "userMarker",
+    "grid",
+    "gridLayer",
+    "coinsOwned",
+  );
 }
 
 interface AppUI {
@@ -87,10 +132,40 @@ function makeElement<Tag extends keyof HTMLElementTagNameMap>(
   return elem;
 }
 
+function tileCoordsToBounds(
+  map: leaflet.Map,
+  layer: leaflet.GridLayer,
+  coords: leaflet.Point,
+) {
+  /* There is something like this in the internals of Leaflet
+    (see private method _tileCoordsToBounds in leaflet.GridLayer)
+    but it is not exported from @types/leaflet,
+    and I should not use it anyway since it is a private method.
+    In spite of this, I have a legitimate need for it.
+    Therefore, I have reconstructed its functionality here. */
+  const tileSize = layer.getTileSize();
+  const nwPoint = coords.scaleBy(tileSize);
+  const sePoint = nwPoint.add(tileSize);
+  const nw = map.unproject(nwPoint);
+  const se = map.unproject(sePoint);
+  return map.wrapLatLngBounds(leaflet.latLngBounds(nw, se));
+}
+
 function boundsAround(center: leaflet.LatLng, radius: number) {
   return leaflet.latLngBounds(
     leaflet.latLng(center.lat + radius, center.lng + radius),
     leaflet.latLng(center.lat - radius, center.lng - radius),
+  );
+}
+
+function getNearestDiscreteLatLng(
+  where: leaflet.LatLng,
+  marginLat: number,
+  marginLng: number,
+) {
+  return leaflet.latLng(
+    Math.round(where.lat / marginLat) * marginLat,
+    Math.round(where.lng / marginLng) * marginLng,
   );
 }
 
@@ -115,7 +190,7 @@ function makeGrid(
   })).addTo(map);
 }
 
-function makeMap(ui: AppUI) {
+function makeMap(state: Partial<AppState>, ui: AppUI) {
   const map = leaflet.map(ui.map, {
     center: MAP_CENTER,
     zoom: MAP_ZOOM,
@@ -128,20 +203,40 @@ function makeMap(ui: AppUI) {
     maxZoom: MAP_ZOOM,
     attribution: MAP_ATTRIBUTION,
   }).addTo(map);
+  state.map = map;
   return map;
 }
 
-function makeGeocoinGrid(state: AppState, ui: AppUI) {
-  makeGrid(state.map, function (coords: leaflet.Point) {
-    const key = coords.toString();
-    let value: GeocoinGridCell;
-    if (key in state.grid) {
-      value = state.grid[key];
-    } else {
-      value = makeGridCell(state, ui, coords, this.getTileSize());
-      state.grid[key] = value;
-    }
-    return value.canvas;
+function getGridCell(state: AppState, ui: AppUI, coords: leaflet.LatLng) {
+  const latLng = getNearestDiscreteLatLng(
+    coords,
+    GRID_LATLNG_DIMENSIONS,
+    GRID_LATLNG_DIMENSIONS,
+  );
+  const key = latLng.toString();
+  let value: GeocoinGridCell;
+  if (key in state.grid) {
+    value = state.grid[key];
+  } else {
+    value = makeGridCell.call(state.gridLayer, state, ui, latLng);
+    state.grid[key] = value;
+  }
+  return value;
+}
+
+function makeGeocoinGrid(
+  state: Incomplete<AppState, "map" | "userMarker">,
+  ui: AppUI,
+) {
+  state.gridLayer = makeGrid(state.map, function (coords: leaflet.Point) {
+    /* Workaround for needing state to have gridLayer
+      while we are still building it */
+    state.gridLayer = this;
+    return getGridCell(
+      asCompleteAppState(state),
+      ui,
+      tileCoordsToBounds(state.map, this, coords).getCenter(),
+    ).canvas;
   }, {
     bounds: boundsAround(
       state.userMarker.getLatLng(),
@@ -160,25 +255,25 @@ function makeUserMarker(map: leaflet.Map) {
 function makeGridCell(
   state: AppState,
   ui: AppUI,
-  coords: leaflet.Point,
-  size: leaflet.Point,
+  latLng: leaflet.LatLng,
 ) {
+  const size = state.gridLayer.getTileSize();
   const canvas = document.createElement("canvas");
   canvas.width = size.x;
   canvas.height = size.y;
   const ctx = canvas.getContext("2d");
-  const hasCache = luck(`Is there a geocoin cache at ${coords.toString()}?`) >
+  const hasCache = luck(`Is there a geocoin cache at ${latLng.toString()}?`) >
     1 - GEOCOIN_CACHE_PROBABILITY;
   const coins = hasCache
     ? Math.round(lerp(
       GEOCOIN_CACHE_MIN_VALUE,
       GEOCOIN_CACHE_MAX_VALUE,
-      luck(`How many geocoins are in the cache at ${coords.toString()}?`),
+      luck(`How many geocoins are in the cache at ${latLng.toString()}?`),
     ))
     : 0;
   if (hasCache) {
     canvas.onclick = (mouseEvent) =>
-      showGeocoinCachePopup(state, ui, coords, mouseEvent);
+      showGeocoinCachePopup(state, ui, mouseEvent);
     if (ctx !== null) {
       ctx.save();
       ctx.translate(canvas.width / 2, canvas.height / 2);
@@ -189,81 +284,81 @@ function makeGridCell(
       ctx.restore();
     }
   }
-  return { canvas, ctx, hasCache, coins };
+  return { canvas, ctx, latLng, hasCache, coins };
 }
 
 function showGeocoinCachePopup(
   state: AppState,
   ui: AppUI,
-  coords: leaflet.Point,
   mouseEvent: MouseEvent,
 ) {
-  const key = coords.toString();
-  if (key in state.grid) {
-    const latLng = state.map.mouseEventToLatLng(mouseEvent);
-    const cell = state.grid[key];
-    const popupContent = makeElement(null, "aside", {
-      className: "map-popup",
-    }, (elem) => {
-      const status = makeElement(elem, "p");
-      const takeButton = makeElement(elem, "button", {
-        innerHTML: "Take a coin",
-        onclick: () => {
-          if (cell.coins > 0) {
-            cell.coins--;
-            state.coinsOwned++;
-            updatePopup();
-            updateInventoryStatus(state, ui);
-          }
-        },
-      });
-      const leaveButton = makeElement(elem, "button", {
-        innerHTML: "Leave a coin",
-        onclick: () => {
-          if (state.coinsOwned > 0) {
-            cell.coins++;
-            state.coinsOwned--;
-            updatePopup();
-            updateInventoryStatus(state, ui);
-          }
-        },
-      });
-      makeElement(elem, "br");
-      const takeAllButton = makeElement(elem, "button", {
-        innerHTML: "Take all",
-        onclick: () => {
-          state.coinsOwned += cell.coins;
-          cell.coins = 0;
+  const cell = getGridCell(
+    state,
+    ui,
+    state.map.mouseEventToLatLng(mouseEvent),
+  );
+  if (!cell.hasCache) return;
+  const popupContent = makeElement(null, "aside", {
+    className: "map-popup",
+  }, (elem) => {
+    const status = makeElement(elem, "p");
+    const takeButton = makeElement(elem, "button", {
+      innerHTML: "Take a coin",
+      onclick: () => {
+        if (cell.coins > 0) {
+          cell.coins--;
+          state.coinsOwned++;
           updatePopup();
           updateInventoryStatus(state, ui);
-        },
-      });
-      const leaveAllButton = makeElement(elem, "button", {
-        innerHTML: "Leave all",
-        onclick: () => {
-          cell.coins += state.coinsOwned;
-          state.coinsOwned = 0;
-          updatePopup();
-          updateInventoryStatus(state, ui);
-        },
-      });
-      const updatePopup = () => {
-        status.innerHTML = `
-          This cache at ${latLng.toString()}
-          contains ${cell.coins} geocoin(s).
-        `;
-        takeButton.disabled = cell.coins <= 0;
-        leaveButton.disabled = state.coinsOwned <= 0;
-        takeAllButton.disabled = takeButton.disabled;
-        leaveAllButton.disabled = leaveButton.disabled;
-      };
-      updatePopup();
+        }
+      },
     });
-    setTimeout(
-      () => state.map.openPopup(popupContent, latLng),
-      10,
-    );
-  }
+    const leaveButton = makeElement(elem, "button", {
+      innerHTML: "Leave a coin",
+      onclick: () => {
+        if (state.coinsOwned > 0) {
+          cell.coins++;
+          state.coinsOwned--;
+          updatePopup();
+          updateInventoryStatus(state, ui);
+        }
+      },
+    });
+    makeElement(elem, "br");
+    const takeAllButton = makeElement(elem, "button", {
+      innerHTML: "Take all",
+      onclick: () => {
+        state.coinsOwned += cell.coins;
+        cell.coins = 0;
+        updatePopup();
+        updateInventoryStatus(state, ui);
+      },
+    });
+    const leaveAllButton = makeElement(elem, "button", {
+      innerHTML: "Leave all",
+      onclick: () => {
+        cell.coins += state.coinsOwned;
+        state.coinsOwned = 0;
+        updatePopup();
+        updateInventoryStatus(state, ui);
+      },
+    });
+    const updatePopup = () => {
+      status.innerHTML = `
+        This cache at ${cell.latLng.toString()}
+        contains ${cell.coins} geocoin(s).
+      `;
+      takeButton.disabled = cell.coins <= 0;
+      leaveButton.disabled = state.coinsOwned <= 0;
+      takeAllButton.disabled = takeButton.disabled;
+      leaveAllButton.disabled = leaveButton.disabled;
+    };
+    updatePopup();
+  });
+  setTimeout(
+    () => state.map.openPopup(popupContent, cell.latLng),
+    10,
+  );
 }
 
 function updateInventoryStatus(state: AppState, ui: AppUI) {
@@ -276,6 +371,17 @@ function updateInventoryStatus(state: AppState, ui: AppUI) {
   }
 }
 
+function makeAppState(ui: AppUI): AppState {
+  const result: Partial<AppState> = { grid: {}, coinsOwned: 0 };
+  const map = makeMap(result, ui);
+  result.userMarker = makeUserMarker(map);
+  makeGeocoinGrid(
+    asHavingProperties<AppState>(result)("map", "userMarker"),
+    ui,
+  );
+  return result as AppState;
+}
+
 // Init
 
 const appUI: AppUI = {
@@ -283,13 +389,4 @@ const appUI: AppUI = {
   inventorySummary: document.querySelector("#inventory-total")!,
 };
 
-const theMap = makeMap(appUI);
-
-const appState: AppState = {
-  map: theMap,
-  userMarker: makeUserMarker(theMap),
-  grid: {},
-  coinsOwned: 0,
-};
-
-makeGeocoinGrid(appState, appUI);
+makeAppState(appUI);
