@@ -43,7 +43,7 @@ h6 {
   font-size: 16pt;
 }
 
-#inventory ul {
+#inventory ul, .map-popup ul {
   max-height: 3em;
   overflow-y: scroll;
 }

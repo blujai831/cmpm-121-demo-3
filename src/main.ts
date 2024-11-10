@@ -48,6 +48,8 @@ const GEOCOIN_CACHE_EMOJI = "\u{1F381}";
 const GEOCOIN_CACHE_EMOJI_STYLE = "32px sans-serif";
 const GEOCOIN_CACHE_VISIBILITY_RADIUS = 8;
 
+type Geocoin = string;
+
 /* I'm aware the assignment requires that we use the flyweight pattern
   for game location objects. I argue I am using it:
   the shared intrinsic state is as defined below,
@@ -64,7 +66,7 @@ interface GeocoinGridCell {
   ctx: CanvasRenderingContext2D | null;
   latLng: leaflet.LatLng;
   hasCache: boolean;
-  coins: number;
+  coins: Geocoin[];
 }
 
 type GeocoinGrid = Record<string, GeocoinGridCell>;
@@ -74,7 +76,7 @@ interface AppState {
   userMarker: leaflet.Marker;
   grid: GeocoinGrid;
   gridLayer: leaflet.GridLayer;
-  coinsOwned: number;
+  coinsOwned: Geocoin[];
 }
 
 function asCompleteAppState(state: Partial<AppState>): AppState {
@@ -89,7 +91,8 @@ function asCompleteAppState(state: Partial<AppState>): AppState {
 
 interface AppUI {
   map: HTMLElement;
-  inventorySummary: HTMLElement;
+  inventorySummary: HTMLParagraphElement;
+  inventoryList: HTMLUListElement;
 }
 
 // Utility functions
@@ -264,13 +267,17 @@ function makeGridCell(
   const ctx = canvas.getContext("2d");
   const hasCache = luck(`Is there a geocoin cache at ${latLng.toString()}?`) >
     1 - GEOCOIN_CACHE_PROBABILITY;
-  const coins = hasCache
-    ? Math.round(lerp(
+  const coins: Geocoin[] = [];
+  if (hasCache) {
+    const count = Math.round(lerp(
       GEOCOIN_CACHE_MIN_VALUE,
       GEOCOIN_CACHE_MAX_VALUE,
       luck(`How many geocoins are in the cache at ${latLng.toString()}?`),
-    ))
-    : 0;
+    ));
+    for (let i = 1; i <= count; i++) {
+      coins.push(`#${i}@${latLng}`);
+    }
+  }
   if (hasCache) {
     canvas.onclick = (mouseEvent) =>
       showGeocoinCachePopup(state, ui, mouseEvent);
@@ -301,13 +308,15 @@ function showGeocoinCachePopup(
   const popupContent = makeElement(null, "aside", {
     className: "map-popup",
   }, (elem) => {
-    const status = makeElement(elem, "p");
+    const cacheCoinCount = makeElement(elem, "p");
+    const cacheCoinList = makeElement(elem, "ul");
     const takeButton = makeElement(elem, "button", {
       innerHTML: "Take a coin",
       onclick: () => {
-        if (cell.coins > 0) {
-          cell.coins--;
-          state.coinsOwned++;
+        if (cell.coins.length > 0) {
+          const coin = cell.coins[cell.coins.length - 1];
+          cell.coins.pop();
+          state.coinsOwned.push(coin);
           updatePopup();
           updateInventoryStatus(state, ui);
         }
@@ -316,9 +325,10 @@ function showGeocoinCachePopup(
     const leaveButton = makeElement(elem, "button", {
       innerHTML: "Leave a coin",
       onclick: () => {
-        if (state.coinsOwned > 0) {
-          cell.coins++;
-          state.coinsOwned--;
+        if (state.coinsOwned.length > 0) {
+          const coin = state.coinsOwned[state.coinsOwned.length - 1];
+          state.coinsOwned.pop();
+          cell.coins.push(coin);
           updatePopup();
           updateInventoryStatus(state, ui);
         }
@@ -328,8 +338,8 @@ function showGeocoinCachePopup(
     const takeAllButton = makeElement(elem, "button", {
       innerHTML: "Take all",
       onclick: () => {
-        state.coinsOwned += cell.coins;
-        cell.coins = 0;
+        state.coinsOwned = [...state.coinsOwned, ...cell.coins];
+        cell.coins.length = 0;
         updatePopup();
         updateInventoryStatus(state, ui);
       },
@@ -337,19 +347,26 @@ function showGeocoinCachePopup(
     const leaveAllButton = makeElement(elem, "button", {
       innerHTML: "Leave all",
       onclick: () => {
-        cell.coins += state.coinsOwned;
-        state.coinsOwned = 0;
+        cell.coins = [...cell.coins, ...state.coinsOwned];
+        state.coinsOwned.length = 0;
         updatePopup();
         updateInventoryStatus(state, ui);
       },
     });
     const updatePopup = () => {
-      status.innerHTML = `
+      cacheCoinList.innerHTML = "";
+      cacheCoinCount.innerHTML = `
         This cache at ${cell.latLng.toString()}
-        contains ${cell.coins} geocoin(s).
+        contains ${cell.coins.length} geocoin(s)
       `;
-      takeButton.disabled = cell.coins <= 0;
-      leaveButton.disabled = state.coinsOwned <= 0;
+      if (cell.coins.length > 0) {
+        cacheCoinCount.innerHTML += ":";
+        for (const coin of cell.coins) {
+          makeElement(cacheCoinList, "li", { innerHTML: coin });
+        }
+      }
+      takeButton.disabled = cell.coins.length <= 0;
+      leaveButton.disabled = state.coinsOwned.length <= 0;
       takeAllButton.disabled = takeButton.disabled;
       leaveAllButton.disabled = leaveButton.disabled;
     };
@@ -362,17 +379,21 @@ function showGeocoinCachePopup(
 }
 
 function updateInventoryStatus(state: AppState, ui: AppUI) {
-  if (state.coinsOwned > 0) {
+  ui.inventoryList.innerHTML = "";
+  if (state.coinsOwned.length > 0) {
     ui.inventorySummary.innerHTML = `
-      ${state.coinsOwned} geocoin(s)
+      ${state.coinsOwned.length} geocoin(s):
     `;
+    for (const coin of state.coinsOwned) {
+      makeElement(ui.inventoryList, "li", { innerHTML: coin });
+    }
   } else {
     ui.inventorySummary.innerHTML = "Empty";
   }
 }
 
 function makeAppState(ui: AppUI): AppState {
-  const result: Partial<AppState> = { grid: {}, coinsOwned: 0 };
+  const result: Partial<AppState> = { grid: {}, coinsOwned: [] };
   const map = makeMap(result, ui);
   result.userMarker = makeUserMarker(map);
   makeGeocoinGrid(
@@ -387,6 +408,7 @@ function makeAppState(ui: AppUI): AppState {
 const appUI: AppUI = {
   map: document.querySelector("#map")!,
   inventorySummary: document.querySelector("#inventory-total")!,
+  inventoryList: document.querySelector("#inventory ul")!,
 };
 
 makeAppState(appUI);
