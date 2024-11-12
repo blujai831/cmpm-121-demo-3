@@ -246,6 +246,14 @@ function moveUserMarker(
   ).latLng;
   state.userMarker.setLatLng(to);
   state.map.panTo(to);
+  state.gridLayer.redraw();
+}
+
+function gridCellInRange(state: AppState, cell: GeocoinGridCell) {
+  return boundsAround(
+    state.userMarker.getLatLng(),
+    GRID_LATLNG_DIMENSIONS * GEOCOIN_CACHE_VISIBILITY_RADIUS,
+  ).contains(cell.latLng);
 }
 
 // UI
@@ -297,9 +305,10 @@ function getGridCell(state: AppState, ui: AppUIOut, coords: leaflet.LatLng) {
   if (key in state.grid) {
     value = state.grid[key];
   } else {
-    value = makeGridCell.call(state.gridLayer, state, ui, latLng);
+    value = makeGridCell.call(state.gridLayer, state, latLng);
     state.grid[key] = value;
   }
+  updateGridCellPresentation(state, ui, value);
   return value;
 }
 
@@ -316,19 +325,6 @@ function makeGeocoinGrid(
       ui,
       tileCoordsToBounds(state.map, this, coords).getCenter(),
     ).canvas;
-  }, {
-    /* Assignment D3.c requires caches only be visible within a radius
-      around the user. I believe this is why we are expected to have need
-      of the memento pattern to serialize and deserialize caches
-      as they leave and reenter this radius. However, by leveraging
-      leaflet.GridLayer, my implementation is able to solve this problem
-      trivially without use of the memento pattern: I simply store the caches
-      at all times, and even though they always exist in memory, the GridLayer
-      automatically controls whether they exist in the page. */
-    bounds: boundsAround(
-      state.userMarker.getLatLng(),
-      GRID_LATLNG_DIMENSIONS * GEOCOIN_CACHE_VISIBILITY_RADIUS,
-    ),
   });
 }
 
@@ -341,7 +337,6 @@ function makeUserMarker(map: leaflet.Map) {
 
 function makeGridCell(
   state: AppState,
-  ui: AppUIOut,
   latLng: leaflet.LatLng,
 ) {
   const size = state.gridLayer.getTileSize();
@@ -362,19 +357,6 @@ function makeGridCell(
       coins.push(`#${i}@${latLng}`);
     }
   }
-  if (hasCache) {
-    canvas.onclick = (mouseEvent) =>
-      showGeocoinCachePopup(state, ui, mouseEvent);
-    if (ctx !== null) {
-      ctx.save();
-      ctx.translate(canvas.width / 2, canvas.height / 2);
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.font = GEOCOIN_CACHE_EMOJI_STYLE;
-      ctx.fillText(GEOCOIN_CACHE_EMOJI, 0, 0);
-      ctx.restore();
-    }
-  }
   return {
     canvas,
     ctx,
@@ -388,6 +370,31 @@ function makeGridCell(
       populateGeocoinGridCellFromMemento(this, memento);
     },
   };
+}
+
+function updateGridCellPresentation(
+  state: AppState,
+  ui: AppUIOut,
+  cell: GeocoinGridCell,
+) {
+  if (cell.ctx !== null) {
+    cell.ctx.clearRect(0, 0, cell.canvas.width, cell.canvas.height);
+  }
+  if (cell.hasCache && gridCellInRange(state, cell)) {
+    cell.canvas.onclick = (mouseEvent) =>
+      showGeocoinCachePopup(state, ui, mouseEvent);
+    if (cell.ctx !== null) {
+      cell.ctx.save();
+      cell.ctx.translate(cell.canvas.width / 2, cell.canvas.height / 2);
+      cell.ctx.textAlign = "center";
+      cell.ctx.textBaseline = "middle";
+      cell.ctx.font = GEOCOIN_CACHE_EMOJI_STYLE;
+      cell.ctx.fillText(GEOCOIN_CACHE_EMOJI, 0, 0);
+      cell.ctx.restore();
+    }
+  } else {
+    cell.canvas.onclick = () => {};
+  }
 }
 
 function showGeocoinCachePopup(
