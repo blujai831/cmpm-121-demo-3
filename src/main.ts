@@ -71,6 +71,20 @@ interface GeocoinGridCell {
   fromMemento(memento: GeocoinGridCellMemento): void;
 }
 
+function asCompleteGeocoinGridCell(
+  cell: Partial<GeocoinGridCell>,
+): GeocoinGridCell {
+  return asHavingProperties<GeocoinGridCell>(cell)(
+    "canvas",
+    "ctx",
+    "latLng",
+    "hasCache",
+    "coins",
+    "toMemento",
+    "fromMemento",
+  );
+}
+
 /* Assignment D3.c requires us to implement the memento pattern
   so as to ensure that we "save the state of caches so that their contents
   [are] preserved even when the player moves out of view and back."
@@ -90,7 +104,7 @@ interface GeocoinGridCellMementoObject {
   coins: Geocoin[];
 }
 
-type GeocoinGrid = Record<string, GeocoinGridCell>;
+type GeocoinGrid = Record<string, GeocoinGridCellMemento>;
 
 interface AppState {
   map: leaflet.Map;
@@ -211,7 +225,7 @@ function geocoinGridCellToMemento(cell: GeocoinGridCell) {
 }
 
 function populateGeocoinGridCellFromMemento(
-  cell: GeocoinGridCell,
+  cell: Incomplete<GeocoinGridCell, "canvas" | "ctx">,
   memento: GeocoinGridCellMemento,
 ) {
   const mementoObject: GeocoinGridCellMementoObject = asHavingProperties<
@@ -303,13 +317,17 @@ function getGridCell(state: AppState, ui: AppUIOut, coords: leaflet.LatLng) {
   const key = latLng.toString();
   let value: GeocoinGridCell;
   if (key in state.grid) {
-    value = state.grid[key];
+    value = makeGridCell(state, latLng, state.grid[key]);
   } else {
-    value = makeGridCell.call(state.gridLayer, state, latLng);
-    state.grid[key] = value;
+    value = makeGridCell(state, latLng);
+    state.grid[key] = value.toMemento();
   }
   updateGridCellPresentation(state, ui, value);
   return value;
+}
+
+function saveGridCell(state: AppState, cell: GeocoinGridCell) {
+  state.grid[cell.latLng.toString()] = cell.toMemento();
 }
 
 function makeGeocoinGrid(
@@ -338,38 +356,49 @@ function makeUserMarker(map: leaflet.Map) {
 function makeGridCell(
   state: AppState,
   latLng: leaflet.LatLng,
+  memento?: GeocoinGridCellMemento,
 ) {
   const size = state.gridLayer.getTileSize();
   const canvas = document.createElement("canvas");
   canvas.width = size.x;
   canvas.height = size.y;
   const ctx = canvas.getContext("2d");
-  const hasCache = luck(`Is there a geocoin cache at ${latLng.toString()}?`) >
-    1 - GEOCOIN_CACHE_PROBABILITY;
-  const coins: Geocoin[] = [];
-  if (hasCache) {
-    const count = Math.round(lerp(
-      GEOCOIN_CACHE_MIN_VALUE,
-      GEOCOIN_CACHE_MAX_VALUE,
-      luck(`How many geocoins are in the cache at ${latLng.toString()}?`),
-    ));
-    for (let i = 1; i <= count; i++) {
-      coins.push(`#${i}@${latLng}`);
-    }
-  }
-  return {
+  const result: Incomplete<
+    GeocoinGridCell,
+    "canvas" | "ctx" | "latLng" | "toMemento" | "fromMemento"
+  > = {
     canvas,
     ctx,
     latLng,
-    hasCache,
-    coins,
     toMemento() {
-      return geocoinGridCellToMemento(this);
+      return geocoinGridCellToMemento(
+        asCompleteGeocoinGridCell(this),
+      );
     },
     fromMemento(memento: GeocoinGridCellMemento) {
       populateGeocoinGridCellFromMemento(this, memento);
     },
   };
+  if (memento === undefined) {
+    const hasCache = luck(`Is there a geocoin cache at ${latLng.toString()}?`) >
+      1 - GEOCOIN_CACHE_PROBABILITY;
+    const coins: Geocoin[] = [];
+    if (hasCache) {
+      const count = Math.round(lerp(
+        GEOCOIN_CACHE_MIN_VALUE,
+        GEOCOIN_CACHE_MAX_VALUE,
+        luck(`How many geocoins are in the cache at ${latLng.toString()}?`),
+      ));
+      for (let i = 1; i <= count; i++) {
+        coins.push(`#${i}@${latLng}`);
+      }
+    }
+    result.hasCache = hasCache;
+    result.coins = coins;
+  } else {
+    result.fromMemento(memento);
+  }
+  return asCompleteGeocoinGridCell(result);
 }
 
 function updateGridCellPresentation(
@@ -422,6 +451,7 @@ function showGeocoinCachePopup(
           state.coinsOwned.push(coin);
           updatePopup();
           updateInventoryStatus(state, ui);
+          saveGridCell(state, cell);
         }
       },
     });
@@ -434,6 +464,7 @@ function showGeocoinCachePopup(
           cell.coins.push(coin);
           updatePopup();
           updateInventoryStatus(state, ui);
+          saveGridCell(state, cell);
         }
       },
     });
@@ -445,6 +476,7 @@ function showGeocoinCachePopup(
         cell.coins.length = 0;
         updatePopup();
         updateInventoryStatus(state, ui);
+        saveGridCell(state, cell);
       },
     });
     const leaveAllButton = makeElement(elem, "button", {
@@ -454,6 +486,7 @@ function showGeocoinCachePopup(
         state.coinsOwned.length = 0;
         updatePopup();
         updateInventoryStatus(state, ui);
+        saveGridCell(state, cell);
       },
     });
     const updatePopup = () => {
