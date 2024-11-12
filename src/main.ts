@@ -110,10 +110,17 @@ function asCompleteAppState(state: Partial<AppState>): AppState {
   );
 }
 
-interface AppUI {
+interface AppUIOut {
   map: HTMLElement;
   inventorySummary: HTMLParagraphElement;
   inventoryList: HTMLUListElement;
+}
+
+interface AppUIIn {
+  northButton: HTMLButtonElement;
+  southButton: HTMLButtonElement;
+  eastButton: HTMLButtonElement;
+  westButton: HTMLButtonElement;
 }
 
 // Utility functions
@@ -193,6 +200,8 @@ function getNearestDiscreteLatLng(
   );
 }
 
+// Logic
+
 function geocoinGridCellToMemento(cell: GeocoinGridCell) {
   return JSON.stringify({
     latLng: { lat: cell.latLng.lat, lng: cell.latLng.lng },
@@ -207,13 +216,36 @@ function populateGeocoinGridCellFromMemento(
 ) {
   const mementoObject: GeocoinGridCellMementoObject = asHavingProperties<
     GeocoinGridCellMementoObject
-  >(JSON.parse(memento))("latLng", "hasCache", "coins");
+  >(JSON.parse(memento))(
+    "latLng",
+    "hasCache",
+    "coins",
+  );
   cell.latLng = leaflet.latLng(
     mementoObject.latLng.lat,
     mementoObject.latLng.lng,
   );
   cell.hasCache = mementoObject.hasCache;
   cell.coins = mementoObject.coins;
+}
+
+function moveUserMarker(
+  state: AppState,
+  uiOut: AppUIOut,
+  lat: number,
+  lng: number,
+) {
+  const from = state.userMarker.getLatLng();
+  const to = getGridCell(
+    state,
+    uiOut,
+    leaflet.latLng(
+      from.lat + lat * GRID_LATLNG_DIMENSIONS,
+      from.lng + lng * GRID_LATLNG_DIMENSIONS,
+    ),
+  ).latLng;
+  state.userMarker.setLatLng(to);
+  state.map.panTo(to);
 }
 
 // UI
@@ -237,7 +269,7 @@ function makeGrid(
   })).addTo(map);
 }
 
-function makeMap(state: Partial<AppState>, ui: AppUI) {
+function makeMap(state: Partial<AppState>, ui: AppUIOut) {
   const map = leaflet.map(ui.map, {
     center: MAP_CENTER,
     zoom: MAP_ZOOM,
@@ -254,7 +286,7 @@ function makeMap(state: Partial<AppState>, ui: AppUI) {
   return map;
 }
 
-function getGridCell(state: AppState, ui: AppUI, coords: leaflet.LatLng) {
+function getGridCell(state: AppState, ui: AppUIOut, coords: leaflet.LatLng) {
   const latLng = getNearestDiscreteLatLng(
     coords,
     GRID_LATLNG_DIMENSIONS,
@@ -273,7 +305,7 @@ function getGridCell(state: AppState, ui: AppUI, coords: leaflet.LatLng) {
 
 function makeGeocoinGrid(
   state: Incomplete<AppState, "map" | "userMarker">,
-  ui: AppUI,
+  ui: AppUIOut,
 ) {
   state.gridLayer = makeGrid(state.map, function (coords: leaflet.Point) {
     /* Workaround for needing state to have gridLayer
@@ -309,7 +341,7 @@ function makeUserMarker(map: leaflet.Map) {
 
 function makeGridCell(
   state: AppState,
-  ui: AppUI,
+  ui: AppUIOut,
   latLng: leaflet.LatLng,
 ) {
   const size = state.gridLayer.getTileSize();
@@ -360,7 +392,7 @@ function makeGridCell(
 
 function showGeocoinCachePopup(
   state: AppState,
-  ui: AppUI,
+  ui: AppUIOut,
   mouseEvent: MouseEvent,
 ) {
   const cell = getGridCell(
@@ -442,7 +474,7 @@ function showGeocoinCachePopup(
   );
 }
 
-function updateInventoryStatus(state: AppState, ui: AppUI) {
+function updateInventoryStatus(state: AppState, ui: AppUIOut) {
   ui.inventoryList.innerHTML = "";
   if (state.coinsOwned.length > 0) {
     ui.inventorySummary.innerHTML = `
@@ -456,7 +488,7 @@ function updateInventoryStatus(state: AppState, ui: AppUI) {
   }
 }
 
-function makeAppState(ui: AppUI): AppState {
+function makeAppState(ui: AppUIOut): AppState {
   const result: Partial<AppState> = { grid: {}, coinsOwned: [] };
   const map = makeMap(result, ui);
   result.userMarker = makeUserMarker(map);
@@ -467,12 +499,29 @@ function makeAppState(ui: AppUI): AppState {
   return result as AppState;
 }
 
+function makeAppUIOut(): AppUIOut {
+  return {
+    map: document.querySelector("#map")!,
+    inventorySummary: document.querySelector("#inventory-total")!,
+    inventoryList: document.querySelector("#inventory ul")!,
+  };
+}
+
+function makeAppUIIn(state: AppState, uiOut: AppUIOut): AppUIIn {
+  const result: AppUIIn = {
+    northButton: document.querySelector("#north")!,
+    southButton: document.querySelector("#south")!,
+    eastButton: document.querySelector("#east")!,
+    westButton: document.querySelector("#west")!,
+  };
+  result.northButton.onclick = moveUserMarker.bind(null, state, uiOut, 1, 0);
+  result.southButton.onclick = moveUserMarker.bind(null, state, uiOut, -1, 0);
+  result.eastButton.onclick = moveUserMarker.bind(null, state, uiOut, 0, 1);
+  result.westButton.onclick = moveUserMarker.bind(null, state, uiOut, 0, -1);
+  return result;
+}
+
 // Init
 
-const appUI: AppUI = {
-  map: document.querySelector("#map")!,
-  inventorySummary: document.querySelector("#inventory-total")!,
-  inventoryList: document.querySelector("#inventory ul")!,
-};
-
-makeAppState(appUI);
+const uiOut = makeAppUIOut();
+makeAppUIIn(makeAppState(uiOut), uiOut);
