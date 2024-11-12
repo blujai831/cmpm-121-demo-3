@@ -67,6 +67,27 @@ interface GeocoinGridCell {
   latLng: leaflet.LatLng;
   hasCache: boolean;
   coins: Geocoin[];
+  toMemento(): GeocoinGridCellMemento;
+  fromMemento(memento: GeocoinGridCellMemento): void;
+}
+
+/* Assignment D3.c requires us to implement the memento pattern
+  so as to ensure that we "save the state of caches so that their contents
+  [are] preserved even when the player moves out of view and back."
+  My implementation already accomplishes this without explicit use
+  of the memento pattern; as such, it does not also use the memento pattern
+  for it, because then the state of caches would be saved in two different ways
+  in parallel, which would be needlessly redundant and introduce
+  the possibility of consistency errors. However, I am implementing,
+  but not yet using, the memento pattern at this time regardless, both because
+  it is required by the assignment, and because it will make persistent storage
+  of grid cells possible for assignment D3.d. */
+type GeocoinGridCellMemento = string;
+
+interface GeocoinGridCellMementoObject {
+  latLng: { lat: number; lng: number };
+  hasCache: boolean;
+  coins: Geocoin[];
 }
 
 type GeocoinGrid = Record<string, GeocoinGridCell>;
@@ -172,6 +193,29 @@ function getNearestDiscreteLatLng(
   );
 }
 
+function geocoinGridCellToMemento(cell: GeocoinGridCell) {
+  return JSON.stringify({
+    latLng: { lat: cell.latLng.lat, lng: cell.latLng.lng },
+    hasCache: cell.hasCache,
+    coins: cell.coins,
+  });
+}
+
+function populateGeocoinGridCellFromMemento(
+  cell: GeocoinGridCell,
+  memento: GeocoinGridCellMemento,
+) {
+  const mementoObject: GeocoinGridCellMementoObject = asHavingProperties<
+    GeocoinGridCellMementoObject
+  >(JSON.parse(memento))("latLng", "hasCache", "coins");
+  cell.latLng = leaflet.latLng(
+    mementoObject.latLng.lat,
+    mementoObject.latLng.lng,
+  );
+  cell.hasCache = mementoObject.hasCache;
+  cell.coins = mementoObject.coins;
+}
+
 // UI
 
 function makeGrid(
@@ -241,6 +285,14 @@ function makeGeocoinGrid(
       tileCoordsToBounds(state.map, this, coords).getCenter(),
     ).canvas;
   }, {
+    /* Assignment D3.c requires caches only be visible within a radius
+      around the user. I believe this is why we are expected to have need
+      of the memento pattern to serialize and deserialize caches
+      as they leave and reenter this radius. However, by leveraging
+      leaflet.GridLayer, my implementation is able to solve this problem
+      trivially without use of the memento pattern: I simply store the caches
+      at all times, and even though they always exist in memory, the GridLayer
+      automatically controls whether they exist in the page. */
     bounds: boundsAround(
       state.userMarker.getLatLng(),
       GRID_LATLNG_DIMENSIONS * GEOCOIN_CACHE_VISIBILITY_RADIUS,
@@ -291,7 +343,19 @@ function makeGridCell(
       ctx.restore();
     }
   }
-  return { canvas, ctx, latLng, hasCache, coins };
+  return {
+    canvas,
+    ctx,
+    latLng,
+    hasCache,
+    coins,
+    toMemento() {
+      return geocoinGridCellToMemento(this);
+    },
+    fromMemento(memento: GeocoinGridCellMemento) {
+      populateGeocoinGridCellFromMemento(this, memento);
+    },
+  };
 }
 
 function showGeocoinCachePopup(
