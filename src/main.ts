@@ -85,17 +85,6 @@ function asCompleteGeocoinGridCell(
   );
 }
 
-/* Assignment D3.c requires us to implement the memento pattern
-  so as to ensure that we "save the state of caches so that their contents
-  [are] preserved even when the player moves out of view and back."
-  My implementation already accomplishes this without explicit use
-  of the memento pattern; as such, it does not also use the memento pattern
-  for it, because then the state of caches would be saved in two different ways
-  in parallel, which would be needlessly redundant and introduce
-  the possibility of consistency errors. However, I am implementing,
-  but not yet using, the memento pattern at this time regardless, both because
-  it is required by the assignment, and because it will make persistent storage
-  of grid cells possible for assignment D3.d. */
 type GeocoinGridCellMemento = string;
 
 interface GeocoinGridCellMementoObject {
