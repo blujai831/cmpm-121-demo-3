@@ -777,3 +777,30 @@ const uiOut = makeAppUIOut();
 const appState = makeAppState(uiOut);
 loadStateFromLocalStorage(appState, uiOut);
 makeAppUIIn(appState, uiOut);
+
+/* Stylistic things I know are wrong with my code:
+  - I have attempted, but failed, to completely separate app state from UI.
+    As a consequence, I have to pass uiOut everywhere all the time.
+    I'm not fixing this right now because I don't know how I'd fix it.
+  - Incomplete<> is an inherently unstylish generic.
+    (I'm not going to use the word "smelly." Wait, shoot, I just used it!)
+    It prevents data-driven design by requiring me to reiterate
+    an interface's members ad nauseum. I'm not fixing this right now
+    because I don't know how I'd fix it. In particular, I don't see how else
+    I'd go about accessing fields of a Partial<> in a type-safe way
+    that doesn't require me to litter inline checks for undefined
+    all throughout my code, and I don't see any way of eliding the need
+    to use some variation of Partial<> in the first place
+    to call functions on an object I'm not finished constructing,
+    nor any way of eliding the need to for such function calls at all.
+  - I repeat myself a lot in regard to coordinate math.
+    I'm not going to fix this right now, because I estimate
+    that's a two-hour project, and it's late at night.
+
+  Known actual bugs:
+  - There seems to be some very, very slight inaccuracy or misalignment
+    between where on the map my grid cells are drawn
+    and where my math thinks they are. I don't know where this inaccuracy
+    is coming from. I've already tried everything I can think of
+    to get rid of it, and Googled extensively for a solution,
+    and I stand defeated. */
