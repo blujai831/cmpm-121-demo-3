@@ -286,9 +286,9 @@ function moveUserMarkerToLatLng(
   const fromCell =
     getGridCell(state, uiOut, state.userMarker.getLatLng()).latLng;
   state.userMarker.setLatLng(latLng);
-  state.map.panTo(latLng);
   const toCell = getGridCell(state, uiOut, latLng).latLng;
   if (toCell.toString() != fromCell.toString()) {
+    state.map.panTo(latLng);
     state.gridLayer.redraw();
   }
   state.locationHistory.push(latLng);
