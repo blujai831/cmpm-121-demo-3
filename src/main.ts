@@ -680,6 +680,7 @@ function stopSyncingUserMarkerToGeolocation(
 ) {
   if (uiIn.geolocationWatchID !== null) {
     navigator.geolocation.clearWatch(uiIn.geolocationWatchID);
+    uiIn.geolocationWatchID = null;
   }
 }
 
