@@ -100,7 +100,9 @@ interface AppState {
   userMarker: leaflet.Marker;
   grid: GeocoinGrid;
   gridLayer: leaflet.GridLayer;
+  polyline: leaflet.Polyline;
   coinsOwned: Geocoin[];
+  locationHistory: leaflet.LatLng[];
 }
 
 function asCompleteAppState(state: Partial<AppState>): AppState {
@@ -109,16 +111,18 @@ function asCompleteAppState(state: Partial<AppState>): AppState {
     "userMarker",
     "grid",
     "gridLayer",
+    "polyline",
     "coinsOwned",
+    "locationHistory",
   );
 }
 
 type AppStateMemento = string;
 
 interface AppStateMementoObject {
-  userMarkerLatLng: { lat: number; lng: number };
   grid: GeocoinGrid;
   coinsOwned: Geocoin[];
+  locationHistory: { lat: number; lng: number }[];
 }
 
 interface AppUIOut {
@@ -288,6 +292,8 @@ function moveUserMarkerToLatLng(
   if (toCell.toString() != fromCell.toString()) {
     state.gridLayer.redraw();
   }
+  state.locationHistory.push(latLng);
+  state.polyline.addLatLng(latLng);
 }
 
 function gridCellInRange(state: AppState, cell: GeocoinGridCell) {
@@ -453,19 +459,26 @@ function makeAppState(ui: AppUIOut): AppState {
   const result: Partial<AppState> = { grid: {}, coinsOwned: [] };
   const map = makeMap(result, ui);
   result.userMarker = makeUserMarker(map);
+  const polyline = leaflet.polyline([]);
+  map.addLayer(polyline);
+  result.polyline = polyline;
+  result.locationHistory = [];
   makeGeocoinGrid(
     asHavingProperties<AppState>(result)("map", "userMarker"),
     ui,
   );
-  return result as AppState;
+  return asCompleteAppState(result);
 }
 
 function serializeAppState(appState: AppState): AppStateMemento {
-  const latLng = appState.userMarker.getLatLng();
+  const locationHistory: { lat: number; lng: number }[] = [];
+  for (const latLng of appState.locationHistory) {
+    locationHistory.push({ lat: latLng.lat, lng: latLng.lng });
+  }
   return JSON.stringify({
-    userMarkerLatLng: { lat: latLng.lat, lng: latLng.lng },
     grid: appState.grid,
     coinsOwned: appState.coinsOwned,
+    locationHistory,
   });
 }
 
@@ -485,14 +498,18 @@ function deserializeAppState(
   for (const coin of mementoObject.coinsOwned) {
     appState.coinsOwned.push(coin);
   }
-  moveUserMarkerToLatLng(
-    appState,
-    uiOut,
-    leaflet.latLng(
-      mementoObject.userMarkerLatLng.lat,
-      mementoObject.userMarkerLatLng.lng,
-    ),
-  );
+  const latLng = mementoObject.locationHistory[
+    mementoObject.locationHistory.length - 1
+  ];
+  const leafletLatLng = leaflet.latLng(latLng.lat, latLng.lng);
+  moveUserMarkerToLatLng(appState, uiOut, leafletLatLng);
+  appState.locationHistory.length = 0;
+  appState.polyline.setLatLngs([]);
+  for (const latLng of mementoObject.locationHistory) {
+    const leafletLatLng = leaflet.latLng(latLng.lat, latLng.lng);
+    appState.locationHistory.push(leafletLatLng);
+    appState.polyline.addLatLng(leafletLatLng);
+  }
 }
 
 // UI
