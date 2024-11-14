@@ -128,6 +128,39 @@ interface AppUIIn {
 
 // Utility functions
 
+function lerp(min: number, max: number, weight: number) {
+  return min + weight * (max - min);
+}
+
+function makeElement<Tag extends keyof HTMLElementTagNameMap>(
+  parent: Node | null,
+  what: Tag,
+  attrs?: Partial<HTMLElementTagNameMap[Tag]>,
+  how?: (elem: HTMLElementTagNameMap[Tag]) => void,
+): HTMLElementTagNameMap[Tag] {
+  const elem = document.createElement(what);
+  if (attrs !== undefined) Object.assign(elem, attrs);
+  how?.call(elem, elem);
+  parent?.appendChild(elem);
+  return elem;
+}
+
+function arrayRemove<T>(ts: T[], predicate: (t: T) => boolean): T | null {
+  for (let i = 0; i < ts.length; i++) {
+    const t = ts[i];
+    if (predicate(t)) {
+      for (let j = i; j < ts.length - 1; j++) {
+        ts[j] = ts[j + 1];
+      }
+      ts.length--;
+      return t;
+    }
+  }
+  return null;
+}
+
+// Logic
+
 function latLngDistToPointDist(
   map: leaflet.Map,
   latLng: leaflet.LatLng,
@@ -147,23 +180,6 @@ function latLngDistToPointDist(
     Math.abs(shiftedPoint.y - referencePoint.y),
   );
   return distPoint;
-}
-
-function lerp(min: number, max: number, weight: number) {
-  return min + weight * (max - min);
-}
-
-function makeElement<Tag extends keyof HTMLElementTagNameMap>(
-  parent: Node | null,
-  what: Tag,
-  attrs?: Partial<HTMLElementTagNameMap[Tag]>,
-  how?: (elem: HTMLElementTagNameMap[Tag]) => void,
-): HTMLElementTagNameMap[Tag] {
-  const elem = document.createElement(what);
-  if (attrs !== undefined) Object.assign(elem, attrs);
-  how?.call(elem, elem);
-  parent?.appendChild(elem);
-  return elem;
 }
 
 function tileCoordsToBounds(
@@ -202,8 +218,6 @@ function getNearestDiscreteLatLng(
     Math.round(where.lng / marginLng) * marginLng,
   );
 }
-
-// Logic
 
 function geocoinGridCellToMemento(cell: GeocoinGridCell) {
   return JSON.stringify({
@@ -259,42 +273,59 @@ function gridCellInRange(state: AppState, cell: GeocoinGridCell) {
   ).contains(cell.latLng);
 }
 
-// UI
-
-function makeGrid(
-  map: leaflet.Map,
-  createTile: (this: leaflet.GridLayer, coords: leaflet.Point) => HTMLElement,
-  options?: object,
-): leaflet.GridLayer {
-  return (new (leafletExtend<leaflet.GridLayer>(leaflet.GridLayer, {
-    createTile,
-  }))({
-    tileSize: latLngDistToPointDist(
-      map,
-      leaflet.latLng(
-        GRID_LATLNG_DIMENSIONS,
-        GRID_LATLNG_DIMENSIONS,
-      ),
-    ),
-    ...(options || {}),
-  })).addTo(map);
+function tryGenerateGeocoinCache(
+  cell: Incomplete<GeocoinGridCell, "latLng">,
+): boolean {
+  const hasCache =
+    luck(`Is there a geocoin cache at ${cell.latLng.toString()}?`) >
+      1 - GEOCOIN_CACHE_PROBABILITY;
+  const coins: Geocoin[] = [];
+  if (hasCache) {
+    const count = Math.round(lerp(
+      GEOCOIN_CACHE_MIN_VALUE,
+      GEOCOIN_CACHE_MAX_VALUE,
+      luck(`How many geocoins are in the cache at ${cell.latLng.toString()}?`),
+    ));
+    for (let i = 1; i <= count; i++) {
+      coins.push(`#${i}@${cell.latLng}`);
+    }
+  }
+  cell.hasCache = hasCache;
+  cell.coins = coins;
+  return cell.hasCache;
 }
 
-function makeMap(state: Partial<AppState>, ui: AppUIOut) {
-  const map = leaflet.map(ui.map, {
-    center: MAP_CENTER,
-    zoom: MAP_ZOOM,
-    minZoom: MAP_ZOOM,
-    maxZoom: MAP_ZOOM,
-    zoomControl: false,
-    scrollWheelZoom: false,
-  });
-  leaflet.tileLayer(MAP_DATA_URL, {
-    maxZoom: MAP_ZOOM,
-    attribution: MAP_ATTRIBUTION,
-  }).addTo(map);
-  state.map = map;
-  return map;
+function moveCoin(
+  from: Geocoin[],
+  to: Geocoin[],
+  coin?: Geocoin,
+): boolean {
+  if (from.length <= 0) {
+    return false;
+  }
+  if (coin === undefined) {
+    coin = from[0];
+  }
+  const coinTaken = arrayRemove(
+    from,
+    (candidate: Geocoin) => candidate === coin,
+  );
+  if (coinTaken !== null) {
+    to.push(coinTaken);
+    return true;
+  } else {
+    return false;
+  }
+}
+
+function moveAllCoins(
+  from: Geocoin[],
+  to: Geocoin[],
+) {
+  for (const coin of from) {
+    to.push(coin);
+  }
+  from.length = 0;
 }
 
 function getGridCell(state: AppState, ui: AppUIOut, coords: leaflet.LatLng) {
@@ -320,7 +351,7 @@ function saveGridCell(state: AppState, cell: GeocoinGridCell) {
 }
 
 function makeGeocoinGrid(
-  state: Incomplete<AppState, "map" | "userMarker">,
+  state: Incomplete<AppState, "map">,
   ui: AppUIOut,
 ) {
   state.gridLayer = makeGrid(state.map, function (coords: leaflet.Point) {
@@ -333,13 +364,6 @@ function makeGeocoinGrid(
       tileCoordsToBounds(state.map, this, coords).getCenter(),
     ).canvas;
   });
-}
-
-function makeUserMarker(map: leaflet.Map) {
-  const marker = leaflet.marker(MAP_CENTER);
-  marker.bindTooltip("You Are Here");
-  marker.addTo(map);
-  return marker;
 }
 
 function makeGridCell(
@@ -369,25 +393,67 @@ function makeGridCell(
     },
   };
   if (memento === undefined) {
-    const hasCache = luck(`Is there a geocoin cache at ${latLng.toString()}?`) >
-      1 - GEOCOIN_CACHE_PROBABILITY;
-    const coins: Geocoin[] = [];
-    if (hasCache) {
-      const count = Math.round(lerp(
-        GEOCOIN_CACHE_MIN_VALUE,
-        GEOCOIN_CACHE_MAX_VALUE,
-        luck(`How many geocoins are in the cache at ${latLng.toString()}?`),
-      ));
-      for (let i = 1; i <= count; i++) {
-        coins.push(`#${i}@${latLng}`);
-      }
-    }
-    result.hasCache = hasCache;
-    result.coins = coins;
+    tryGenerateGeocoinCache(result);
   } else {
     result.fromMemento(memento);
   }
   return asCompleteGeocoinGridCell(result);
+}
+
+function makeMap(state: Partial<AppState>, ui: AppUIOut) {
+  const map = leaflet.map(ui.map, {
+    center: MAP_CENTER,
+    zoom: MAP_ZOOM,
+    minZoom: MAP_ZOOM,
+    maxZoom: MAP_ZOOM,
+    zoomControl: false,
+    scrollWheelZoom: false,
+  });
+  leaflet.tileLayer(MAP_DATA_URL, {
+    maxZoom: MAP_ZOOM,
+    attribution: MAP_ATTRIBUTION,
+  }).addTo(map);
+  state.map = map;
+  return map;
+}
+
+function makeUserMarker(map: leaflet.Map) {
+  const marker = leaflet.marker(MAP_CENTER);
+  marker.bindTooltip("You Are Here");
+  marker.addTo(map);
+  return marker;
+}
+
+function makeAppState(ui: AppUIOut): AppState {
+  const result: Partial<AppState> = { grid: {}, coinsOwned: [] };
+  const map = makeMap(result, ui);
+  result.userMarker = makeUserMarker(map);
+  makeGeocoinGrid(
+    asHavingProperties<AppState>(result)("map", "userMarker"),
+    ui,
+  );
+  return result as AppState;
+}
+
+// UI
+
+function makeGrid(
+  map: leaflet.Map,
+  createTile: (this: leaflet.GridLayer, coords: leaflet.Point) => HTMLElement,
+  options?: object,
+): leaflet.GridLayer {
+  return (new (leafletExtend<leaflet.GridLayer>(leaflet.GridLayer, {
+    createTile,
+  }))({
+    tileSize: latLngDistToPointDist(
+      map,
+      leaflet.latLng(
+        GRID_LATLNG_DIMENSIONS,
+        GRID_LATLNG_DIMENSIONS,
+      ),
+    ),
+    ...(options || {}),
+  })).addTo(map);
 }
 
 function updateGridCellPresentation(
@@ -434,10 +500,7 @@ function showGeocoinCachePopup(
     const takeButton = makeElement(elem, "button", {
       innerHTML: "Take a coin",
       onclick: () => {
-        if (cell.coins.length > 0) {
-          const coin = cell.coins[cell.coins.length - 1];
-          cell.coins.pop();
-          state.coinsOwned.push(coin);
+        if (moveCoin(cell.coins, state.coinsOwned)) {
           updatePopup();
           updateInventoryStatus(state, ui);
           saveGridCell(state, cell);
@@ -447,10 +510,7 @@ function showGeocoinCachePopup(
     const leaveButton = makeElement(elem, "button", {
       innerHTML: "Leave a coin",
       onclick: () => {
-        if (state.coinsOwned.length > 0) {
-          const coin = state.coinsOwned[state.coinsOwned.length - 1];
-          state.coinsOwned.pop();
-          cell.coins.push(coin);
+        if (moveCoin(state.coinsOwned, cell.coins)) {
           updatePopup();
           updateInventoryStatus(state, ui);
           saveGridCell(state, cell);
@@ -461,8 +521,7 @@ function showGeocoinCachePopup(
     const takeAllButton = makeElement(elem, "button", {
       innerHTML: "Take all",
       onclick: () => {
-        state.coinsOwned = [...state.coinsOwned, ...cell.coins];
-        cell.coins.length = 0;
+        moveAllCoins(cell.coins, state.coinsOwned);
         updatePopup();
         updateInventoryStatus(state, ui);
         saveGridCell(state, cell);
@@ -471,8 +530,7 @@ function showGeocoinCachePopup(
     const leaveAllButton = makeElement(elem, "button", {
       innerHTML: "Leave all",
       onclick: () => {
-        cell.coins = [...cell.coins, ...state.coinsOwned];
-        state.coinsOwned.length = 0;
+        moveAllCoins(state.coinsOwned, cell.coins);
         updatePopup();
         updateInventoryStatus(state, ui);
         saveGridCell(state, cell);
@@ -497,6 +555,7 @@ function showGeocoinCachePopup(
     };
     updatePopup();
   });
+  // Prevent same mouse event that opened popup from closing it
   setTimeout(
     () => state.map.openPopup(popupContent, cell.latLng),
     10,
@@ -515,17 +574,6 @@ function updateInventoryStatus(state: AppState, ui: AppUIOut) {
   } else {
     ui.inventorySummary.innerHTML = "Empty";
   }
-}
-
-function makeAppState(ui: AppUIOut): AppState {
-  const result: Partial<AppState> = { grid: {}, coinsOwned: [] };
-  const map = makeMap(result, ui);
-  result.userMarker = makeUserMarker(map);
-  makeGeocoinGrid(
-    asHavingProperties<AppState>(result)("map", "userMarker"),
-    ui,
-  );
-  return result as AppState;
 }
 
 function makeAppUIOut(): AppUIOut {
