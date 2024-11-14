@@ -113,6 +113,14 @@ function asCompleteAppState(state: Partial<AppState>): AppState {
   );
 }
 
+type AppStateMemento = string;
+
+interface AppStateMementoObject {
+  userMarkerLatLng: { lat: number; lng: number };
+  grid: GeocoinGrid;
+  coinsOwned: Geocoin[];
+}
+
 interface AppUIOut {
   map: HTMLElement;
   inventorySummary: HTMLParagraphElement;
@@ -264,6 +272,7 @@ function moveUserMarkerByCells(
       from.lng + lngCells * GRID_LATLNG_DIMENSIONS,
     ),
   );
+  saveStateToLocalStorage(state);
 }
 
 function moveUserMarkerToLatLng(
@@ -363,6 +372,7 @@ function getGridCell(state: AppState, ui: AppUIOut, coords: leaflet.LatLng) {
 
 function saveGridCell(state: AppState, cell: GeocoinGridCell) {
   state.grid[cell.latLng.toString()] = cell.toMemento();
+  saveStateToLocalStorage(state);
 }
 
 function makeGeocoinGrid(
@@ -448,6 +458,41 @@ function makeAppState(ui: AppUIOut): AppState {
     ui,
   );
   return result as AppState;
+}
+
+function serializeAppState(appState: AppState): AppStateMemento {
+  const latLng = appState.userMarker.getLatLng();
+  return JSON.stringify({
+    userMarkerLatLng: { lat: latLng.lat, lng: latLng.lng },
+    grid: appState.grid,
+    coinsOwned: appState.coinsOwned,
+  });
+}
+
+function deserializeAppState(
+  appState: AppState,
+  uiOut: AppUIOut,
+  memento: AppStateMemento,
+) {
+  const mementoObject: AppStateMementoObject = JSON.parse(memento);
+  for (const key of Object.keys(appState.grid)) {
+    delete appState.grid[key];
+  }
+  for (const key of Object.keys(mementoObject.grid)) {
+    appState.grid[key] = mementoObject.grid[key];
+  }
+  appState.coinsOwned.length = 0;
+  for (const coin of mementoObject.coinsOwned) {
+    appState.coinsOwned.push(coin);
+  }
+  moveUserMarkerToLatLng(
+    appState,
+    uiOut,
+    leaflet.latLng(
+      mementoObject.userMarkerLatLng.lat,
+      mementoObject.userMarkerLatLng.lng,
+    ),
+  );
 }
 
 // UI
@@ -692,7 +737,26 @@ function toggleGeolocation(state: AppState, uiOut: AppUIOut, uiIn: AppUIIn) {
   }
 }
 
+function saveStateToLocalStorage(state: AppState) {
+  localStorage.setItem(
+    "serializedAppState",
+    serializeAppState(state),
+  );
+}
+
+function loadStateFromLocalStorage(state: AppState, uiOut: AppUIOut): boolean {
+  const serializedAppState = localStorage.getItem("serializedAppState");
+  if (serializedAppState !== null) {
+    deserializeAppState(state, uiOut, serializedAppState);
+    return true;
+  } else {
+    return false;
+  }
+}
+
 // Init
 
 const uiOut = makeAppUIOut();
-makeAppUIIn(makeAppState(uiOut), uiOut);
+const appState = makeAppState(uiOut);
+loadStateFromLocalStorage(appState, uiOut);
+makeAppUIIn(appState, uiOut);
