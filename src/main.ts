@@ -120,10 +120,13 @@ interface AppUIOut {
 }
 
 interface AppUIIn {
+  geolocationButton: HTMLButtonElement;
   northButton: HTMLButtonElement;
   southButton: HTMLButtonElement;
   eastButton: HTMLButtonElement;
   westButton: HTMLButtonElement;
+  resetButton: HTMLButtonElement;
+  geolocationWatchID: number | null;
 }
 
 // Utility functions
@@ -246,24 +249,36 @@ function populateGeocoinGridCellFromMemento(
   cell.coins = mementoObject.coins;
 }
 
-function moveUserMarker(
+function moveUserMarkerByCells(
   state: AppState,
   uiOut: AppUIOut,
-  lat: number,
-  lng: number,
+  latCells: number,
+  lngCells: number,
 ) {
   const from = state.userMarker.getLatLng();
-  const to = getGridCell(
+  moveUserMarkerToLatLng(
     state,
     uiOut,
     leaflet.latLng(
-      from.lat + lat * GRID_LATLNG_DIMENSIONS,
-      from.lng + lng * GRID_LATLNG_DIMENSIONS,
+      from.lat + latCells * GRID_LATLNG_DIMENSIONS,
+      from.lng + lngCells * GRID_LATLNG_DIMENSIONS,
     ),
-  ).latLng;
-  state.userMarker.setLatLng(to);
-  state.map.panTo(to);
-  state.gridLayer.redraw();
+  );
+}
+
+function moveUserMarkerToLatLng(
+  state: AppState,
+  uiOut: AppUIOut,
+  latLng: leaflet.LatLng,
+) {
+  const fromCell =
+    getGridCell(state, uiOut, state.userMarker.getLatLng()).latLng;
+  state.userMarker.setLatLng(latLng);
+  state.map.panTo(latLng);
+  const toCell = getGridCell(state, uiOut, latLng).latLng;
+  if (toCell.toString() != fromCell.toString()) {
+    state.gridLayer.redraw();
+  }
 }
 
 function gridCellInRange(state: AppState, cell: GeocoinGridCell) {
@@ -586,16 +601,94 @@ function makeAppUIOut(): AppUIOut {
 
 function makeAppUIIn(state: AppState, uiOut: AppUIOut): AppUIIn {
   const result: AppUIIn = {
+    geolocationButton: document.querySelector("#sensor")!,
     northButton: document.querySelector("#north")!,
     southButton: document.querySelector("#south")!,
     eastButton: document.querySelector("#east")!,
     westButton: document.querySelector("#west")!,
+    resetButton: document.querySelector("#reset")!,
+    geolocationWatchID: null,
   };
-  result.northButton.onclick = moveUserMarker.bind(null, state, uiOut, 1, 0);
-  result.southButton.onclick = moveUserMarker.bind(null, state, uiOut, -1, 0);
-  result.eastButton.onclick = moveUserMarker.bind(null, state, uiOut, 0, 1);
-  result.westButton.onclick = moveUserMarker.bind(null, state, uiOut, 0, -1);
+  result.geolocationButton.onclick = toggleGeolocation.bind(
+    null,
+    state,
+    uiOut,
+    result,
+  );
+  result.northButton.onclick = moveUserMarkerByCells.bind(
+    null,
+    state,
+    uiOut,
+    1,
+    0,
+  );
+  result.southButton.onclick = moveUserMarkerByCells.bind(
+    null,
+    state,
+    uiOut,
+    -1,
+    0,
+  );
+  result.eastButton.onclick = moveUserMarkerByCells.bind(
+    null,
+    state,
+    uiOut,
+    0,
+    1,
+  );
+  result.westButton.onclick = moveUserMarkerByCells.bind(
+    null,
+    state,
+    uiOut,
+    0,
+    -1,
+  );
   return result;
+}
+
+// Device API reliant functions
+
+function eachGeolocationPosition(
+  uiIn: AppUIIn,
+  doWhat: (posn: GeolocationPosition) => void,
+) {
+  navigator.geolocation.getCurrentPosition((posn) => {
+    doWhat(posn);
+    uiIn.geolocationWatchID = navigator.geolocation.watchPosition(doWhat);
+  });
+}
+
+function keepUserMarkerSyncedToGeolocation(
+  state: AppState,
+  uiOut: AppUIOut,
+  uiIn: AppUIIn,
+) {
+  eachGeolocationPosition(uiIn, (posn) => {
+    moveUserMarkerToLatLng(
+      state,
+      uiOut,
+      leaflet.latLng(
+        posn.coords.latitude,
+        posn.coords.longitude,
+      ),
+    );
+  });
+}
+
+function stopSyncingUserMarkerToGeolocation(
+  uiIn: AppUIIn,
+) {
+  if (uiIn.geolocationWatchID !== null) {
+    navigator.geolocation.clearWatch(uiIn.geolocationWatchID);
+  }
+}
+
+function toggleGeolocation(state: AppState, uiOut: AppUIOut, uiIn: AppUIIn) {
+  if (uiIn.geolocationWatchID === null) {
+    keepUserMarkerSyncedToGeolocation(state, uiOut, uiIn);
+  } else {
+    stopSyncingUserMarkerToGeolocation(uiIn);
+  }
 }
 
 // Init
