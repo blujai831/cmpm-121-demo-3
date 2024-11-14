@@ -498,11 +498,13 @@ function deserializeAppState(
   for (const coin of mementoObject.coinsOwned) {
     appState.coinsOwned.push(coin);
   }
-  const latLng = mementoObject.locationHistory[
-    mementoObject.locationHistory.length - 1
-  ];
-  const leafletLatLng = leaflet.latLng(latLng.lat, latLng.lng);
-  moveUserMarkerToLatLng(appState, uiOut, leafletLatLng);
+  if (mementoObject.locationHistory.length > 0) {
+    const latLng = mementoObject.locationHistory[
+      mementoObject.locationHistory.length - 1
+    ];
+    const leafletLatLng = leaflet.latLng(latLng.lat, latLng.lng);
+    moveUserMarkerToLatLng(appState, uiOut, leafletLatLng);
+  }
   appState.locationHistory.length = 0;
   appState.polyline.setLatLngs([]);
   for (const latLng of mementoObject.locationHistory) {
@@ -510,6 +512,7 @@ function deserializeAppState(
     appState.locationHistory.push(leafletLatLng);
     appState.polyline.addLatLng(leafletLatLng);
   }
+  updateInventoryStatus(appState, uiOut);
 }
 
 // UI
