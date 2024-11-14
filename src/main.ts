@@ -705,6 +705,7 @@ function makeAppUIIn(state: AppState, uiOut: AppUIOut): AppUIIn {
     0,
     -1,
   );
+  result.resetButton.onclick = resetLocalStorage;
   return result;
 }
 
@@ -768,6 +769,13 @@ function loadStateFromLocalStorage(state: AppState, uiOut: AppUIOut): boolean {
     return true;
   } else {
     return false;
+  }
+}
+
+function resetLocalStorage() {
+  if (confirm("Really erase all stored data associated with this web app?")) {
+    localStorage.clear();
+    location.reload();
   }
 }
 
