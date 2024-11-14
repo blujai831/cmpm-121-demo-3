@@ -276,7 +276,6 @@ function moveUserMarkerByCells(
       from.lng + lngCells * GRID_LATLNG_DIMENSIONS,
     ),
   );
-  saveStateToLocalStorage(state);
 }
 
 function moveUserMarkerToLatLng(
@@ -294,6 +293,7 @@ function moveUserMarkerToLatLng(
   }
   state.locationHistory.push(latLng);
   state.polyline.addLatLng(latLng);
+  saveStateToLocalStorage(state);
 }
 
 function gridCellInRange(state: AppState, cell: GeocoinGridCell) {
@@ -513,6 +513,7 @@ function deserializeAppState(
     appState.polyline.addLatLng(leafletLatLng);
   }
   updateInventoryStatus(appState, uiOut);
+  saveStateToLocalStorage(appState);
 }
 
 // UI
@@ -800,10 +801,12 @@ makeAppUIIn(appState, uiOut);
     because I don't know how I'd fix it. In particular, I don't see how else
     I'd go about accessing fields of a Partial<> in a type-safe way
     that doesn't require me to litter inline checks for undefined
-    all throughout my code, and I don't see any way of eliding the need
-    to use some variation of Partial<> in the first place
-    to call functions on an object I'm not finished constructing,
-    nor any way of eliding the need to for such function calls at all.
+    all throughout my code (which would be necessary despite the existence
+    of ?. and ?? because their situational coverage is greatly oversold)
+    and I don't see any way of eliding the need to use some variation
+    of Partial<> in the first place to call functions on an object
+    I'm not finished constructing, nor any way of eliding the need
+    for such function calls at all.
   - I repeat myself a lot in regard to coordinate math.
     I'm not going to fix this right now, because I estimate
     that's a two-hour project, and it's late at night.
